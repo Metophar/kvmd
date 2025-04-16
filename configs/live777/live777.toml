@@ -1,0 +1,13 @@
+# Live777 configuration for PiKVM
+
+[server]
+port = 7788
+bind = "127.0.0.1"
+
+[webrtc]
+stun_urls = ["stun:stun.l.google.com:19302"]
+
+[media]
+video_input = "kvmd::ustreamer::h264"
+video_codec = "h264"
+audio_enabled = false 
