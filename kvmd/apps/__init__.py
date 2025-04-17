@@ -846,4 +846,48 @@ def _get_config_scheme() -> dict:
             "timeout":  Option(300, type=valid_int_f1),
             "interval": Option(30,  type=valid_int_f1),
         },
+
+        "live777": {
+            "enabled": Option(False, type=valid_bool),  # 是否启用 live777
+            
+            "server": {
+                "port": Option(7777, type=valid_port),  # live777 服务器端口
+                "cors": Option(True, type=valid_bool),  # 是否启用 CORS
+            },
+
+            "stun": {
+                "host": Option("stun.l.google.com", type=valid_ip_or_host, unpack_as="stun_host"),
+                "port": Option(19302, type=valid_port, unpack_as="stun_port"),
+            },
+
+            "check": {
+                "interval": Option(10.0, type=valid_float_f01, unpack_as="check_interval"),
+                "retries": Option(5, type=valid_int_f1, unpack_as="check_retries"),
+                "retries_delay": Option(5.0, type=valid_float_f01, unpack_as="check_retries_delay"),
+            },
+
+            "cmd": Option([
+                "/usr/bin/live777",
+                "--config=/etc/kvmd/live777/live777.toml",
+            ], type=valid_command),
+            "cmd_remove": Option([], type=valid_options),
+            "cmd_append": Option([], type=valid_options),
+
+            "memsink": {
+                "h264": {
+                    "sink": Option("kvmd::ustreamer::h264", unpack_as="obj"),
+                    "lock_timeout": Option(1.0, type=valid_float_f01),
+                    "wait_timeout": Option(1.0, type=valid_float_f01),
+                    "drop_same_frames": Option(0.0, type=valid_float_f0),
+                },
+                "audio": {
+                    "capture": {
+                        "device": Option("hw:tc358743,0", type=valid_stripped_string),
+                    },
+                    "playback": {
+                        "device": Option("plughw:UAC2Gadget,0", type=valid_stripped_string),
+                    },
+                },
+            },
+        },
     }
