@@ -1,13 +1,28 @@
-# Live777 configuration for PiKVM
+[http]
+listen = "[::]:7777"
+cors = true
 
-[server]
-port = 7788
-bind = "127.0.0.1"
+[[ice_servers]]
+urls = [
+    "stun:stun.l.google.com:19302"
+]
 
-[webrtc]
-stun_urls = ["stun:stun.l.google.com:19302"]
+[log]
+level = "info"
 
-[media]
-video_input = "kvmd::ustreamer::h264"
-video_codec = "h264"
-audio_enabled = false 
+[strategy]
+each_stream_max_sub = 65535
+auto_create_whip = true
+auto_create_whep = true
+auto_delete_whip = 60000
+auto_delete_whep = 60000
+
+# PiKVM specific settings
+[video]
+sink = "kvmd::ustreamer::h264"
+
+[audio]
+capture_device = "hw:tc358743,0"
+tc358743_device = "/dev/kvmd-video"
+playback_device = "plughw:UAC2Gadget,0"
+uac2_check = "/run/kvmd/otg/uac2.usb0@meta.json"

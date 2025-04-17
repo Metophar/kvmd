@@ -105,6 +105,7 @@ def main() -> None:
             "kvmd.apps.janus",
             "kvmd.apps.watchdog",
             "kvmd.apps.oled",
+            "kvmd.apps.live777",
             "kvmd.helpers",
             "kvmd.helpers.remount",
             "kvmd.helpers.swapfiles",
@@ -137,6 +138,7 @@ def main() -> None:
                 "kvmd-helper-pst-remount = kvmd.helpers.remount:main",
                 "kvmd-helper-otgmsd-remount = kvmd.helpers.remount:main",
                 "kvmd-helper-swapfiles = kvmd.helpers.swapfiles:main",
+                "kvmd-live777 = kvmd.live777:main",
             ],
         },
 

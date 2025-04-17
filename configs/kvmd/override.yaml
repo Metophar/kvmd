@@ -37,3 +37,22 @@
 #    auth:
 #        vncauth:
 #            enabled: true # Enable auth via /etc/kvmd/vncpasswd
+
+webrtc:
+    type: live777
+    port: 7777
+    stun:
+        host: stun.l.google.com
+        port: 19302
+    memsink:
+        h264:
+            sink: "kvmd::ustreamer::h264"
+        audio:
+            capture:
+                device: "hw:tc358743,0"
+            playback:
+                device: "plughw:UAC2Gadget,0"
+
+# Disable janus if it was enabled
+janus:
+    enabled: false

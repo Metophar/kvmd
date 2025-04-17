@@ -1,0 +1,13 @@
+[Unit]
+Description=PiKVM - Live777 WebRTC server
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=3
+ExecStart=/usr/bin/live777 --config /etc/kvmd/live777/live777.toml
+WorkingDirectory=/etc/kvmd/live777
+
+[Install]
+WantedBy=multi-user.target 
