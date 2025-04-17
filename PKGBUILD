@@ -127,6 +127,8 @@ depends=(
 
 	# Misc
 	hostapd
+
+	#live777
 )
 optdepends=(
 	tesseract
@@ -161,7 +163,7 @@ package_kvmd() {
 	install=$pkgname.install
 
 	cd "$srcdir/kvmd-$pkgver"
-	pip install --root="$pkgdir" --no-deps .
+	#pip install --root="$pkgdir" --no-deps .
 
 	install -Dm755 -t "$pkgdir/usr/bin" scripts/kvmd-{bootconfig,gencert,certbot}
 
