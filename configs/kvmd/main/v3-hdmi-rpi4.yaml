@@ -59,6 +59,25 @@ kvmd:
                 initial: true
                 pulse: false
 
+live777:
+    enabled: true
+    server:
+        port: 7777
+        cors: true
+    stun:
+        host: stun.l.google.com
+        port: 19302
+    memsink:
+        h264:
+            sink: kvmd::ustreamer::h264
+        audio:
+            capture:
+                device: hw:tc358743,0
+            playback:
+                device: plughw:UAC2Gadget,0
+
+janus:
+    enabled: false
 
 media:
     memsink:

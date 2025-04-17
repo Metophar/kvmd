@@ -1,3 +1,25 @@
+# ========================================================================== #
+#                                                                            #
+#    KVMD - The main PiKVM daemon.                                           #
+#                                                                            #
+#    Copyright (C) 2018-2024  Maxim Devaev <mdevaev@gmail.com>               #
+#                                                                            #
+#    This program is free software: you can redistribute it and/or modify    #
+#    it under the terms of the GNU General Public License as published by    #
+#    the Free Software Foundation, either version 3 of the License, or       #
+#    (at your option) any later version.                                     #
+#                                                                            #
+#    This program is distributed in the hope that it will be useful,         #
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of          #
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the           #
+#    GNU General Public License for more details.                            #
+#                                                                            #
+#    You should have received a copy of the GNU General Public License       #
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.  #
+#                                                                            #
+# ========================================================================== #
+
+
 import asyncio
 import asyncio.subprocess
 import socket
@@ -11,8 +33,8 @@ from ... import aioproc
 
 from ...logging import get_logger
 
-from ..janus.stun import StunNatType
-from ..janus.stun import Stun
+from .stun import StunNatType
+from .stun import Stun
 
 
 # =====
@@ -27,7 +49,7 @@ class _Netcfg:
 
 
 # =====
-class Live777Runner:  # pylint: disable=too-many-instance-attributes
+class Live777Runner:
     def __init__(  # pylint: disable=too-many-arguments
         self,
         stun_host: str,
@@ -54,7 +76,7 @@ class Live777Runner:  # pylint: disable=too-many-instance-attributes
         self.__cmd = tools.build_cmd(cmd, cmd_remove, cmd_append)
 
         self.__live777_task: (asyncio.Task | None) = None
-        self.__live777_proc: (asyncio.subprocess.Process | None) = None  # pylint: disable=no-member
+        self.__live777_proc: (asyncio.subprocess.Process | None) = None
 
     def run(self) -> None:
         logger = get_logger(0)
@@ -136,9 +158,9 @@ class Live777Runner:  # pylint: disable=too-many-instance-attributes
 
     # =====
 
-    async def __live777_task_loop(self, netcfg: _Netcfg) -> None:  # pylint: disable=too-many-branches
+    async def __live777_task_loop(self, netcfg: _Netcfg) -> None:
         logger = get_logger(0)
-        while True:  # pylint: disable=too-many-nested-blocks
+        while True:
             try:
                 await self.__start_live777_proc(netcfg)
                 assert self.__live777_proc is not None
@@ -157,7 +179,7 @@ class Live777Runner:  # pylint: disable=too-many-instance-attributes
     async def __start_live777_proc(self, netcfg: _Netcfg) -> None:
         assert self.__live777_proc is None
         placeholders = {
-            "o_stun_server": f"{netcfg.stun_ip}:{netcfg.stun_port}",
+            "o_stun_server": f"--stun-server={netcfg.stun_ip}:{netcfg.stun_port}",
             **{
                 key: str(value)
                 for (key, value) in dataclasses.asdict(netcfg).items()
@@ -172,14 +194,13 @@ class Live777Runner:  # pylint: disable=too-many-instance-attributes
             part.format(**placeholders)
             for part in cmd
         ]
-        # Set up environment variables for Live777 - these are different from Janus
-        env = {
-            "LIVE777_INTERFACE": netcfg.src_ip,
-            "LIVE777_STUN_SERVER": f"{netcfg.stun_host}:{netcfg.stun_port}",
-        }
         self.__live777_proc = await aioproc.run_process(
             cmd=cmd,
-            env=env,
+            env={
+                "LIVE777_STUN_URL": f"stun:{netcfg.stun_host}:{netcfg.stun_port}",
+                "LIVE777_VIDEO_SOURCE": "kvmd::ustreamer::h264",
+                "LIVE777_AUDIO_SOURCE": "hw:tc358743,0",
+            },
         )
         get_logger(0).info("Started Live777 pid=%d: %s", self.__live777_proc.pid, tools.cmdfmt(cmd))
 

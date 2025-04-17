@@ -29,6 +29,7 @@ import {wm} from "../wm.js";
 import {JanusStreamer} from "./stream_janus.js";
 import {MediaStreamer} from "./stream_media.js";
 import {MjpegStreamer} from "./stream_mjpeg.js";
+import {Live777Streamer} from "./stream_live777.js";
 
 
 export function Streamer() {
@@ -37,6 +38,7 @@ export function Streamer() {
 	/************************************************************************/
 
 	var __janus_imported = null;
+	var __live777_imported = null;
 	var __streamer = null;
 
 	var __state = null;
@@ -300,12 +302,10 @@ export function Streamer() {
 		}
 		__streamer.stopStream();
 		let orient = tools.storage.getInt("stream.orient", 0);
-		if (mode === "janus") {
+		if (mode === "live777") {
 			let allow_audio = !$("stream-video").muted;
 			let allow_mic = $("stream-mic-switch").checked;
-			__streamer = new JanusStreamer(__setActive, __setInactive, __setInfo, orient, allow_audio, allow_mic);
-			// Firefox doesn't support RTP orientation:
-			//  - https://bugzilla.mozilla.org/show_bug.cgi?id=1316448
+			__streamer = new Live777Streamer(__setActive, __setInactive, __setInfo, orient, allow_audio, allow_mic);
 			tools.feature.setEnabled($("stream-orient"), !tools.browser.is_firefox);
 		} else {
 			if (mode === "media") {
@@ -315,8 +315,8 @@ export function Streamer() {
 				__streamer = new MjpegStreamer(__setActive, __setInactive, __setInfo);
 				tools.feature.setEnabled($("stream-orient"), false);
 			}
-			tools.feature.setEnabled($("stream-audio"), false); // Enabling in stream_janus.js
-			tools.feature.setEnabled($("stream-mic"), false); // Ditto
+			tools.feature.setEnabled($("stream-audio"), false);
+			tools.feature.setEnabled($("stream-mic"), false);
 		}
 		if (wm.isWindowVisible($("stream-window"))) {
 			__streamer.ensureStream((__state && __state.streamer !== undefined) ? __state.streamer : null);

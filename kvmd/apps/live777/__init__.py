@@ -29,7 +29,7 @@ from .runner import Live777Runner
 def main(argv: (list[str] | None)=None) -> None:
     config = init(
         prog="kvmd-Live777",
-        description="Live777 WebRTC Runner",
+        description="Live777 WebRTC Gateway Runner",
         check_run=True,
         argv=argv,
     )[2].live777

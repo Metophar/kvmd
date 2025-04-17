@@ -7,6 +7,7 @@ Before=\
 	kvmd-ipmi.service \
 	kvmd-janus-static.service \
 	kvmd-janus.service \
+	kvmd-live777.service \
 	kvmd-nginx.service \
 	kvmd-otg.service \
 	kvmd-otgnet.service \

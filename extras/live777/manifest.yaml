@@ -1,5 +1,5 @@
 name: Live777
-description: Live777 WebRTC Engine
+description: Live777 WebRTC Gateway
 path: live777
 daemon: kvmd-live777
 place: -1 
