@@ -27,14 +27,17 @@ import dataclasses
 import contextlib
 
 import aiohttp
+import async_lru
 
 from ...logging import get_logger
 
 from ...keyboard.keysym import SymmapModifiers
 from ...keyboard.keysym import build_symmap
-from ...keyboard.mappings import WebModifiers
+from ...keyboard.mappings import EvdevModifiers
 from ...keyboard.mappings import X11Modifiers
-from ...keyboard.mappings import AT1_TO_WEB
+from ...keyboard.mappings import AT1_TO_EVDEV
+
+from ...mouse import MOUSE_TO_EVDEV
 
 from ...clients.kvmd import KvmdClientWs
 from ...clients.kvmd import KvmdClientSession
@@ -52,9 +55,6 @@ from ... import network
 from .rfb import RfbClient
 from .rfb.stream import rfb_format_remote
 from .rfb.errors import RfbError
-
-from .vncauth import VncAuthKvmdCredentials
-from .vncauth import VncAuthManager
 
 from .render import make_text_jpeg
 
@@ -80,20 +80,18 @@ class _Client(RfbClient):  # pylint: disable=too-many-instance-attributes
         desired_fps: int,
         mouse_output: str,
         keymap_name: str,
-        symmap: dict[int, dict[int, str]],
+        symmap: dict[int, dict[int, int]],
         scroll_rate: int,
-        allow_cut_after: float,
 
         kvmd: KvmdClient,
         streamers: list[BaseStreamerClient],
 
-        vnc_credentials: dict[str, VncAuthKvmdCredentials],
+        vncpasses: set[str],
         vencrypt: bool,
         none_auth_only: bool,
+
         shared_params: _SharedParams,
     ) -> None:
-
-        self.__vnc_credentials = vnc_credentials
 
         super().__init__(
             reader=reader,
@@ -103,8 +101,7 @@ class _Client(RfbClient):  # pylint: disable=too-many-instance-attributes
             x509_cert_path=x509_cert_path,
             x509_key_path=x509_key_path,
             scroll_rate=scroll_rate,
-            allow_cut_after=allow_cut_after,
-            vnc_passwds=list(vnc_credentials),
+            vncpasses=vncpasses,
             vencrypt=vencrypt,
             none_auth_only=none_auth_only,
             **dataclasses.asdict(shared_params),
@@ -132,8 +129,8 @@ class _Client(RfbClient):  # pylint: disable=too-many-instance-attributes
 
         # Эти состояния шарить не обязательно - бекенд исключает дублирующиеся события.
         # Все это нужно только чтобы не посылать лишние жсоны в сокет KVMD
-        self.__mouse_buttons: dict[str, (bool | None)] = dict.fromkeys(["left", "right", "middle", "up", "down"], None)
-        self.__mouse_move = {"x": -1, "y": -1}
+        self.__mouse_buttons: dict[str, (bool | None)] = dict.fromkeys(MOUSE_TO_EVDEV, None)
+        self.__mouse_move = (-1, -1)  # (X, Y)
 
         self.__modifiers = 0
 
@@ -319,63 +316,61 @@ class _Client(RfbClient):  # pylint: disable=too-many-instance-attributes
     # =====
 
     async def _authorize_userpass(self, user: str, passwd: str) -> bool:
-        self.__kvmd_session = self.__kvmd.make_session(user, passwd)
-        if (await self.__kvmd_session.auth.check()):
+        self.__kvmd_session = self.__kvmd.make_session()
+        if (await self.__kvmd_session.auth.check(user, passwd)):
             self.__stage1_authorized.set_passed()
             return True
         return False
 
-    async def _on_authorized_vnc_passwd(self, passwd: str) -> str:
-        kc = self.__vnc_credentials[passwd]
-        if (await self._authorize_userpass(kc.user, kc.passwd)):
-            return kc.user
-        return ""
+    async def _on_authorized_vncpass(self) -> None:
+        self.__kvmd_session = self.__kvmd.make_session()
+        self.__stage1_authorized.set_passed()
 
-    async def _on_authorized_none(self) -> bool:
+    async def _authorize_none(self) -> bool:
         return (await self._authorize_userpass("", ""))
 
     # =====
 
     async def _on_key_event(self, code: int, state: bool) -> None:
-        is_modifier = self.__switch_modifiers(code, state)
+        is_modifier = self.__switch_modifiers_x11(code, state)
         variants = self.__symmap.get(code)
         fake_shift = False
 
         if variants:
             if is_modifier:
-                web_key = variants.get(0)
+                key = variants.get(0)
             else:
-                web_key = variants.get(self.__modifiers)
-                if web_key is None:
-                    web_key = variants.get(0)
+                key = variants.get(self.__modifiers)
+                if key is None:
+                    key = variants.get(0)
 
-                if web_key is None and self.__modifiers == 0 and SymmapModifiers.SHIFT in variants:
+                if key is None and self.__modifiers == 0 and SymmapModifiers.SHIFT in variants:
                     # JUMP doesn't send shift events:
                     #   - https://github.com/pikvm/pikvm/issues/820
-                    web_key = variants[SymmapModifiers.SHIFT]
+                    key = variants[SymmapModifiers.SHIFT]
                     fake_shift = True
 
-            if web_key and self.__kvmd_ws:
+            if key and self.__kvmd_ws:
                 if fake_shift:
-                    await self.__kvmd_ws.send_key_event(WebModifiers.SHIFT_LEFT, True)
-                await self.__kvmd_ws.send_key_event(web_key, state)
+                    await self.__kvmd_ws.send_key_event(EvdevModifiers.SHIFT_LEFT, True)
+                await self.__kvmd_ws.send_key_event(key, state)
                 if fake_shift:
-                    await self.__kvmd_ws.send_key_event(WebModifiers.SHIFT_LEFT, False)
+                    await self.__kvmd_ws.send_key_event(EvdevModifiers.SHIFT_LEFT, False)
 
     async def _on_ext_key_event(self, code: int, state: bool) -> None:
-        web_key = AT1_TO_WEB.get(code)
-        if web_key:
-            self.__switch_modifiers(web_key, state)  # Предполагаем, что модификаторы всегда известны
+        key = AT1_TO_EVDEV.get(code, 0)
+        if key:
+            self.__switch_modifiers_evdev(key, state)  # Предполагаем, что модификаторы всегда известны
             if self.__kvmd_ws:
-                await self.__kvmd_ws.send_key_event(web_key, state)
+                await self.__kvmd_ws.send_key_event(key, state)
 
-    def __switch_modifiers(self, key: (int | str), state: bool) -> bool:
+    def __switch_modifiers_x11(self, key: int, state: bool) -> bool:
         mod = 0
-        if key in X11Modifiers.SHIFTS or key in WebModifiers.SHIFTS:
+        if key in X11Modifiers.SHIFTS:
             mod = SymmapModifiers.SHIFT
-        elif key == X11Modifiers.ALTGR or key == WebModifiers.ALT_RIGHT:
+        elif key == X11Modifiers.ALTGR:
             mod = SymmapModifiers.ALTGR
-        elif key in X11Modifiers.CTRLS or key in WebModifiers.CTRLS:
+        elif key in X11Modifiers.CTRLS:
             mod = SymmapModifiers.CTRL
         if mod == 0:
             return False
@@ -385,18 +380,34 @@ class _Client(RfbClient):  # pylint: disable=too-many-instance-attributes
             self.__modifiers &= ~mod
         return True
 
-    async def _on_pointer_event(self, buttons: dict[str, bool], wheel: dict[str, int], move: dict[str, int]) -> None:
+    def __switch_modifiers_evdev(self, key: int, state: bool) -> bool:
+        mod = 0
+        if key in EvdevModifiers.SHIFTS:
+            mod = SymmapModifiers.SHIFT
+        elif key == EvdevModifiers.ALT_RIGHT:
+            mod = SymmapModifiers.ALTGR
+        elif key in EvdevModifiers.CTRLS:
+            mod = SymmapModifiers.CTRL
+        if mod == 0:
+            return False
+        if state:
+            self.__modifiers |= mod
+        else:
+            self.__modifiers &= ~mod
+        return True
+
+    async def _on_pointer_event(self, buttons: dict[str, bool], wheel: tuple[int, int], move: tuple[int, int]) -> None:
         if self.__kvmd_ws:
-            if wheel["x"] or wheel["y"]:
-                await self.__kvmd_ws.send_mouse_wheel_event(wheel["x"], wheel["y"])
+            if wheel[0] or wheel[1]:
+                await self.__kvmd_ws.send_mouse_wheel_event(*wheel)
 
             if self.__mouse_move != move:
-                await self.__kvmd_ws.send_mouse_move_event(move["x"], move["y"])
+                await self.__kvmd_ws.send_mouse_move_event(*move)
                 self.__mouse_move = move
 
             for (button, state) in buttons.items():
                 if self.__mouse_buttons[button] != state:
-                    await self.__kvmd_ws.send_mouse_button_event(button, state)
+                    await self.__kvmd_ws.send_mouse_button_event(MOUSE_TO_EVDEV[button], state)
                     self.__mouse_buttons[button] = state
 
     async def _on_cut_event(self, text: str) -> None:
@@ -443,17 +454,17 @@ class VncServer:  # pylint: disable=too-many-instance-attributes
         x509_cert_path: str,
         x509_key_path: str,
 
+        vncpass_enabled: bool,
+        vncpass_path: str,
         vencrypt_enabled: bool,
 
         desired_fps: int,
         mouse_output: str,
         keymap_path: str,
         scroll_rate: int,
-        allow_cut_after: float,
 
         kvmd: KvmdClient,
         streamers: list[BaseStreamerClient],
-        vnc_auth_manager: VncAuthManager,
     ) -> None:
 
         self.__host = network.get_listen_host(host)
@@ -463,7 +474,8 @@ class VncServer:  # pylint: disable=too-many-instance-attributes
         keymap_name = os.path.basename(keymap_path)
         symmap = build_symmap(keymap_path)
 
-        self.__vnc_auth_manager = vnc_auth_manager
+        self.__vncpass_enabled = vncpass_enabled
+        self.__vncpass_path = vncpass_path
 
         shared_params = _SharedParams()
 
@@ -490,8 +502,8 @@ class VncServer:  # pylint: disable=too-many-instance-attributes
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, timeout)  # type: ignore
 
                 try:
-                    async with kvmd.make_session("", "") as kvmd_session:
-                        none_auth_only = await kvmd_session.auth.check()
+                    async with kvmd.make_session() as kvmd_session:
+                        none_auth_only = await kvmd_session.auth.check("", "")
                 except (aiohttp.ClientError, asyncio.TimeoutError) as ex:
                     logger.error("%s [entry]: Can't check KVMD auth mode: %s", remote, tools.efmt(ex))
                     return
@@ -508,12 +520,11 @@ class VncServer:  # pylint: disable=too-many-instance-attributes
                     keymap_name=keymap_name,
                     symmap=symmap,
                     scroll_rate=scroll_rate,
-                    allow_cut_after=allow_cut_after,
                     kvmd=kvmd,
                     streamers=streamers,
-                    vnc_credentials=(await self.__vnc_auth_manager.read_credentials())[0],
-                    none_auth_only=none_auth_only,
+                    vncpasses=(await self.__read_vncpasses()),
                     vencrypt=vencrypt_enabled,
+                    none_auth_only=none_auth_only,
                     shared_params=shared_params,
                 ).run()
             except Exception:
@@ -524,9 +535,6 @@ class VncServer:  # pylint: disable=too-many-instance-attributes
         self.__handle_client = handle_client
 
     async def __inner_run(self) -> None:
-        if not (await self.__vnc_auth_manager.read_credentials())[1]:
-            raise SystemExit(1)
-
         get_logger(0).info("Listening VNC on TCP [%s]:%d ...", self.__host, self.__port)
         (family, _, _, _, addr) = socket.getaddrinfo(self.__host, self.__port, type=socket.SOCK_STREAM)[0]
         with contextlib.closing(socket.socket(family, socket.SOCK_STREAM)) as sock:
@@ -542,6 +550,21 @@ class VncServer:  # pylint: disable=too-many-instance-attributes
             )
             async with server:
                 await server.serve_forever()
+
+    @async_lru.alru_cache(maxsize=1, ttl=1)
+    async def __read_vncpasses(self) -> set[str]:
+        if self.__vncpass_enabled:
+            try:
+                vncpasses: set[str] = set()
+                for (_, line) in tools.passwds_splitted(await aiotools.read_file(self.__vncpass_path)):
+                    if " -> " in line:  # Compatibility with old ipmipasswd file format
+                        line = line.split(" -> ", 1)[0]
+                    if len(line.strip()) > 0:
+                        vncpasses.add(line)
+                return vncpasses
+            except Exception:
+                get_logger(0).exception("Unhandled exception while reading VNCAuth passwd file")
+        return set()
 
     def run(self) -> None:
         aiotools.run(self.__inner_run())

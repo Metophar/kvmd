@@ -52,6 +52,16 @@ class SwitchApi:
     async def __state_handler(self, _: Request) -> Response:
         return make_json_response(await self.__switch.get_state())
 
+    @exposed_http("POST", "/switch/set_active_prev")
+    async def __set_active_prev_handler(self, _: Request) -> Response:
+        await self.__switch.set_active_prev()
+        return make_json_response()
+
+    @exposed_http("POST", "/switch/set_active_next")
+    async def __set_active_next_handler(self, _: Request) -> Response:
+        await self.__switch.set_active_next()
+        return make_json_response()
+
     @exposed_http("POST", "/switch/set_active")
     async def __set_active_port_handler(self, req: Request) -> Response:
         port = valid_int_f0(req.query.get("port"))
@@ -79,6 +89,7 @@ class SwitchApi:
             param: validator(req.query.get(param))
             for (param, validator) in [
                 ("edid_id", (lambda arg: valid_switch_edid_id(arg, allow_default=True))),
+                ("dummy",   valid_bool),
                 ("name",    valid_switch_port_name),
                 ("atx_click_power_delay",      valid_switch_atx_click_delay),
                 ("atx_click_power_long_delay", valid_switch_atx_click_delay),

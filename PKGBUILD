@@ -68,7 +68,7 @@ depends=(
 	python-dbus
 	python-dbus-next
 	python-pygments
-	python-pyghmi
+	"python-pyghmi>=1.6.0-2"
 	python-pam
 	python-pillow
 	python-xlib
@@ -82,6 +82,7 @@ depends=(
 	python-luma-oled
 	python-pyusb
 	python-pyudev
+	python-evdev
 	"libgpiod>=2.1"
 	freetype2
 	"v4l-utils>=1.22.1-1"

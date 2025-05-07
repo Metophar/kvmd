@@ -56,16 +56,22 @@ class _BaseApiPart:
 
 
 class _AuthApiPart(_BaseApiPart):
-    async def check(self) -> bool:
+    async def check(self, user: str, passwd: str) -> bool:
         session = self._ensure_http_session()
         try:
-            async with session.get("/auth/check") as resp:
+            async with session.get("/auth/check", headers={
+                "X-KVMD-User":   user,
+                "X-KVMD-Passwd": passwd,
+            }) as resp:
+
                 htclient.raise_not_200(resp)
-                return True
+                return (resp.status == 200)  # Just for my paranoia
+
         except aiohttp.ClientResponseError as ex:
             if ex.status in [400, 401, 403]:
                 return False
             raise
+        raise RuntimeError("We should't be here")
 
 
 class _StreamerApiPart(_BaseApiPart):
@@ -130,6 +136,26 @@ class _AtxApiPart(_BaseApiPart):
             raise
 
 
+class _SwitchApiPart(_BaseApiPart):
+    async def set_active_prev(self) -> None:
+        session = self._ensure_http_session()
+        async with session.post("/switch/set_active_prev") as resp:
+            htclient.raise_not_200(resp)
+
+    async def set_active_next(self) -> None:
+        session = self._ensure_http_session()
+        async with session.post("/switch/set_active_next") as resp:
+            htclient.raise_not_200(resp)
+
+    async def set_active(self, port: int) -> None:
+        session = self._ensure_http_session()
+        async with session.post(
+            url="/switch/set_active",
+            params={"port": port},
+        ) as resp:
+            htclient.raise_not_200(resp)
+
+
 # =====
 class KvmdClientWs:
     def __init__(self, ws: aiohttp.ClientWebSocketResponse) -> None:
@@ -182,22 +208,22 @@ class KvmdClientWs:
             finally:
                 self.__communicated = False
 
-    async def send_key_event(self, key: str, state: bool) -> None:
-        mask = (0b01 if state else 0)
-        await self.__writer_queue.put(bytes([1, mask]) + key.encode("ascii"))
+    async def send_key_event(self, key: int, state: bool) -> None:
+        mask = (0b10000000 | int(bool(state)))
+        await self.__writer_queue.put(struct.pack(">BBH", 1, mask, key))
 
-    async def send_mouse_button_event(self, button: str, state: bool) -> None:
-        mask = (0b01 if state else 0)
-        await self.__writer_queue.put(bytes([2, mask]) + button.encode("ascii"))
+    async def send_mouse_button_event(self, button: int, state: bool) -> None:
+        mask = (0b10000000 | int(bool(state)))
+        await self.__writer_queue.put(struct.pack(">BBH", 2, mask, button))
 
     async def send_mouse_move_event(self, to_x: int, to_y: int) -> None:
-        await self.__writer_queue.put(struct.pack(">bhh", 3, to_x, to_y))
+        await self.__writer_queue.put(struct.pack(">Bhh", 3, to_x, to_y))
 
     async def send_mouse_relative_event(self, delta_x: int, delta_y: int) -> None:
-        await self.__writer_queue.put(struct.pack(">bbbb", 4, 0, delta_x, delta_y))
+        await self.__writer_queue.put(struct.pack(">BBbb", 4, 0, delta_x, delta_y))
 
     async def send_mouse_wheel_event(self, delta_x: int, delta_y: int) -> None:
-        await self.__writer_queue.put(struct.pack(">bbbb", 5, 0, delta_x, delta_y))
+        await self.__writer_queue.put(struct.pack(">BBbb", 5, 0, delta_x, delta_y))
 
 
 class KvmdClientSession(BaseHttpClientSession):
@@ -207,6 +233,7 @@ class KvmdClientSession(BaseHttpClientSession):
         self.streamer = _StreamerApiPart(self._ensure_http_session)
         self.hid = _HidApiPart(self._ensure_http_session)
         self.atx = _AtxApiPart(self._ensure_http_session)
+        self.switch = _SwitchApiPart(self._ensure_http_session)
 
     @contextlib.asynccontextmanager
     async def ws(self) -> AsyncGenerator[KvmdClientWs, None]:
@@ -216,9 +243,5 @@ class KvmdClientSession(BaseHttpClientSession):
 
 
 class KvmdClient(BaseHttpClient):
-    def make_session(self, user: str="", passwd: str="") -> KvmdClientSession:
-        headers = {
-            "X-KVMD-User": user,
-            "X-KVMD-Passwd": passwd,
-        }
-        return KvmdClientSession(lambda: self._make_http_session(headers))
+    def make_session(self) -> KvmdClientSession:
+        return KvmdClientSession(self._make_http_session)
